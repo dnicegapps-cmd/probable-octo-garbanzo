@@ -46,21 +46,27 @@ export function smartSearch(query: string, limit = 30): LexiconEntry[] {
   }
 
   const lower = trimmed.toLowerCase()
-  const results: LexiconEntry[] = []
+  const results: Array<{ entry: LexiconEntry; score: number }> = []
 
   for (const [hanzi, raw] of Object.entries(db)) {
-    const matchesPinyin =
-      raw.p.toLowerCase().startsWith(lower) ||
-      raw.s.startsWith(lower)
-    const matchesMeaning = raw.d.some((def) =>
-      def.toLowerCase().includes(lower),
-    )
+    const pinyinExact = raw.p.toLowerCase() === lower
+    const pinyinStarts =
+      raw.p.toLowerCase().startsWith(lower) || raw.s.startsWith(lower)
+    const meaningMatch = raw.d.some((def) => def.toLowerCase().includes(lower))
 
-    if (matchesPinyin || matchesMeaning) {
-      results.push(toEntry(hanzi, raw))
-      if (results.length >= limit) break
-    }
+    if (!pinyinExact && !pinyinStarts && !meaningMatch) continue
+
+    // Score: lower is better (sorts to front)
+    // Prefer HSK characters; within HSK prefer lower levels; non-HSK last
+    const hskScore = raw.h != null ? raw.h : 99
+    // Boost exact pinyin matches above starts-with
+    const matchScore = pinyinExact ? 0 : pinyinStarts ? 1 : 2
+    const score = matchScore * 100 + hskScore
+
+    results.push({ entry: toEntry(hanzi, raw), score })
+    if (results.length >= limit * 3) break // over-collect then trim
   }
 
-  return results
+  results.sort((a, b) => a.score - b.score)
+  return results.slice(0, limit).map((r) => r.entry)
 }
